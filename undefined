@@ -1,0 +1,243 @@
+# Terraform AWS EC2 Instance Module
+
+A Terraform module that provisions an AWS EC2 instance with configurable security settings for SSH access. This module simplifies the deployment of compute resources on AWS with sensible defaults while allowing customization for different environments.
+
+## Overview
+
+This module creates a complete EC2 setup including:
+- An EC2 instance with public IP assignment
+- A security group configured for SSH access
+- Resource tagging for organization and cost tracking
+
+## Resources Created
+
+| Resource Type | Resource Name | Description |
+|---------------|---------------|-------------|
+| `aws_security_group` | `allow_ssh` | Network security rules controlling SSH access to the EC2 instance |
+| `aws_instance` | `example` | The EC2 virtual machine instance |
+
+### Resource Details
+
+**Security Group (`allow_ssh`)**
+- Inbound rules: SSH (TCP port 22) from configurable IP range
+- Outbound rules: All traffic allowed (default)
+- Tags: Name and Environment
+
+**EC2 Instance (`example`)**
+- Network: Default VPC with public IP
+- Storage: Default EBS volume
+- Access: SSH key pair authentication
+- Lifecycle: `prevent_destroy = false`
+- Tags: Name and Environment
+
+## Variables
+
+### Input Variables
+
+| Variable | Description | Type | Default | Required |
+|----------|-------------|------|---------|----------|
+| `region` | AWS region for resource deployment | `string` | `"us-east-1"` | No |
+| `ami_id` | Amazon Machine Image ID for the EC2 instance | `string` | `"ami-09eb231ad55c3963d"` | No |
+| `instance_type` | EC2 instance type (size) | `string` | `"t2.micro"` | No |
+| `instance_name` | Name tag for the EC2 instance | `string` | `"bigo"` | No |
+| `ssh_key_name` | Name of AWS SSH key pair | `string` | `"create a new ssh key pair"` | Yes* |
+| `environment` | Environment tag (dev/staging/production) | `string` | `"production"` | No |
+| `allowed_ssh_ips` | CIDR block for SSH access | `string` | `"0.0.0.0/0"` | No |
+
+*Note: You must replace the default `ssh_key_name` with an actual key pair from your AWS account.
+
+### Variable Purposes
+
+- **`region`**: Specifies the AWS geographical location for your resources. Different regions may have different service availability and pricing.
+
+- **`ami_id`**: Determines the operating system and pre-installed software. The default is an Ubuntu AMI for us-east-1. Change this when using different regions or OS requirements.
+
+- **`instance_type`**: Controls the computing resources (CPU, memory, network). t2.micro is free-tier eligible and suitable for testing.
+
+- **`instance_name`**: Used for identification in the AWS console and billing reports.
+
+- **`ssh_key_name`**: Essential for secure access to your instance. Must reference an existing key pair in your AWS account.
+
+- **`environment`**: Helps organize resources and track costs across different deployment stages.
+
+- **`allowed_ssh_ips`**: Critical security setting that restricts SSH access. Default allows all IPs - always restrict in production!
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `instance_public_ip` | The public IP address of the EC2 instance |
+| `ssh_command_example` | Example SSH command to connect to the instance |
+
+## Requirements
+
+- Terraform >= 0.12
+- AWS Provider properly configured
+- An existing SSH key pair in your target AWS region
+- Appropriate AWS IAM permissions
+
+## Usage
+
+### Basic Example
+
+```hcl
+module "web_server" {
+  source = "./path-to-module"
+  
+  ssh_key_name = "my-aws-key"  # Replace with your actual key name
+}
+```
+
+### Complete Example
+
+```hcl
+module "application_server" {
+  source = "./modules/ec2"
+  
+  # AWS Settings
+  region = "us-west-2"
+  
+  # Instance Configuration
+  ami_id         = "ami-0cf2b4e024cdb6960"  # Ubuntu 20.04 in us-west-2
+  instance_type  = "t3.small"
+  instance_name  = "app-server-01"
+  ssh_key_name   = "production-key"
+  
+  # Security & Environment
+  environment    = "staging"
+  allowed_ssh_ips = "10.0.0.0/16"  # Corporate network only
+}
+
+# Output the connection details
+output "server_ip" {
+  value = module.application_server.instance_public_ip
+}
+
+output "ssh_command" {
+  value = module.application_server.ssh_command_example
+}
+```
+
+## Deployment Steps
+
+1. **Prepare your environment**
+   ```bash
+   # Ensure AWS credentials are configured
+   aws configure
+   
+   # Create or verify your SSH key pair exists
+   aws ec2 describe-key-pairs --region us-east-1
+   ```
+
+2. **Create your Terraform configuration**
+   ```bash
+   mkdir my-ec2-deployment
+   cd my-ec2-deployment
+   ```
+
+3. **Create main.tf**
+   ```hcl
+   module "my_instance" {
+     source = "./ec2-module"
+     
+     ssh_key_name    = "my-key"
+     instance_name   = "test-server"
+     allowed_ssh_ips = "203.0.113.0/32"  # Your IP address
+   }
+   ```
+
+4. **Initialize and deploy**
+   ```bash
+   terraform init
+   terraform plan
+   terraform apply
+   ```
+
+5. **Connect to your instance**
+   ```bash
+   # Get the SSH command
+   terraform output -module=my_instance ssh_command_example
+   
+   # Connect
+   ssh -i ~/.ssh/my-key.pem ubuntu@<instance-ip>
+   ```
+
+## Example Configurations
+
+### Development Environment
+```hcl
+module "dev_server" {
+  source = "./modules/ec2"
+  
+  instance_name   = "development-box"
+  instance_type   = "t2.micro"
+  ssh_key_name    = "dev-key"
+  environment     = "development"
+  allowed_ssh_ips = "0.0.0.0/0"  # Open for development only
+}
+```
+
+### Production Environment
+```hcl
+module "prod_api" {
+  source = "./modules/ec2"
+  
+  region          = "eu-west-1"
+  ami_id          = "ami-0694d931cee176e7d"  # Ubuntu 20.04 EU
+  instance_type   = "t3.large"
+  instance_name   = "api-server-prod"
+  ssh_key_name    = "prod-eu-key"
+  environment     = "production"
+  allowed_ssh_ips = "10.1.0.0/16"  # Restricted access
+}
+```
+
+### With Remote State Backend
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "my-terraform-state"
+    key    = "ec2/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+module "stateful_instance" {
+  source = "./modules/ec2"
+  
+  ssh_key_name = "managed-key"
+  environment  = "production"
+}
+```
+
+## Security Considerations
+
+⚠️ **Important Security Notes:**
+
+1. **SSH Access**: The default `allowed_ssh_ips` is set to `0.0.0.0/0` (open to the internet). Always restrict this to specific IP addresses or CIDR blocks in production.
+
+2. **Key Management**: 
+   - Never commit SSH private keys to version control
+   - Use AWS Systems Manager Session Manager for keyless access
+   - Rotate keys regularly
+
+3. **AMI Selection**:
+   - Verify AMI ownership and source
+   - Keep AMIs updated with latest security patches
+   - Use official AMIs from trusted publishers
+
+## Cleanup
+
+To destroy the resources created by this module:
+
+```bash
+terraform destroy
+```
+
+## Troubleshooting
+
+**Common Issues:**
+
+1. **Invalid key pair**: Ensure the SSH key exists in the correct region
+2. **AMI not found**: AMI IDs are region-specific - use the correct ID for your region
+3. **
